@@ -1,0 +1,762 @@
+# DHLInterfaceClass()
+# Ver 1.0
+# ---------------------------------------------------------------- #
+#   # ______________________ EDIT HISTORY ______________________  #
+#   JOHN ADRIAN 3/24/21
+#       - CREATED CLASS
+#       - CREATED CLASS DOCS
+#       - CREATED CONSTRUCTORS
+#       - CREATED METHODS
+#       - BEGAN INTEGRATION TESTING  
+# ---------------------------------------------------------------- #
+
+# __IMPORTS__ #
+from DB2ConnectorClass import DB2Connector
+import pandas as pd
+import numpy as np
+import requests
+import asyncio
+import aiohttp
+from aiohttp import ClientSession
+import math
+
+# __CLASS__ #
+class DHLInterface:
+
+    # __DOCUMENTATION__#
+    """
+    # THIS CLASS PROVIDES AN INTERFACE WITH THE DHL API. THE MAIN FUNCTIONALITY 
+    # OF THIS CLASS IS TO PULL ACCESS TOKENS, WHICH ONLY LAST 12 HOURS, 
+    # PULL DATA FROM DHL API USING OQL SCRIPTS, PULL DHL REPORTS, AND 
+    # PULL PURCHASE ORDER META DATA. ALL RESPONSES WILL BE IN A JSON 
+    # FORMAT, HOWEVER YOU WILL HAVE THE OPTION TO SELECT WETHER DATA
+    # WILL BE RETURNED AS JSON OR IN A PANDAS DATAFRAME. THIS CLASS IS 
+    # INTEDED TO USED WITH THE DB2ConnectorClass() AND THE DenodoConnectorClass()
+    # IN ORDER TO PUSH AND PULL RELEVANT SUPPLY CHAIN DATA. THIS CLASS CAN
+    # BE WILL RECORD ALL PULL REQUEST PERFORMANCE METRICS AND CAN BE USED IN TANDEM
+    # WITH THE ETLMonitorClass() IN ORDER TO WRITE PERFORMANCE METRICS TO DB2.
+    """
+
+    # __CONSTRUCTOR__ #
+    def __init__(self,
+     base_url ="https://network.infornexus.com/rest/3.1" , data_key, basic_access_key):
+        self.base_url = base_url
+        self.data_key = '?' + str(data_key)
+        self.basic_access_key = basic_access_key
+        self.basic_header = {
+                'Authorization': self.basic_access_key
+        }
+        self.po_parameter = {
+            'ASNType' : 'PONumber',
+            'FreightInvoiceDetail' : 'freightinvoicenumber',
+            'OrderType' : 'ordernumber',
+            'ReadyToShipOrder' : 'orderNumber',
+            'ReceiptType' : 'InvoiceNumber', 
+            'ShippingOrder' : 'PurchaseOrderNumber',
+            'TransportOrderShipment' : 'poNumber'
+        }
+        self.db2_link = DB2Connector('FLEX PROD')
+        self.db2_link.build_connection()
+
+    # __BUILD METHODS__ #
+    async def build_object_url(self, object):
+        ob_url = '/' + str(object)
+        object_url = str(self.base_url) + str(ob_url) + str(self.data_key)
+        return object_url
+
+    def build_oql_url(self, object, oql):
+        url = self.base_url + '/{}'.format(object) + '/query' + self.data_key
+        if oql != '':
+            query = '&oql='
+            for parameter in oql.keys():
+                if len(query) > len('&oql='):
+                    query = query + '&' +  str(parameter) + '=' + str("'{}'".format(oql[parameter]))
+                else:
+                    query = query + str(parameter) + '=' + str("'{}'".format(oql[parameter]))
+            url = url + query 
+            return url
+        else:
+            return url
+
+
+    def pull_object_list(self):
+        response = requests.request("GET", url = self.base_url, headers = self.basic_header)
+        self.object_list = list(response.json()['objectType'])
+        return self.object_list
+
+    def pull_object_oql_options(self, object = ''):
+        self.object_oql_options = {}
+        if object == '':
+            async def main():
+                async with aiohttp.ClientSession() as session:
+                    tasks = []
+                    for ob in self.object_list:
+                        task = asyncio.ensure_future(pull(session, ob))
+                        tasks.append(task)
+                    self.object_oql_error_logs = await asyncio.gather(*tasks)
+            async def pull(session, ob):
+                ob_url = '/' + str(ob)
+                object_url = str(self.base_url) + str(ob_url) + str(self.data_key)
+                async with session.request(method = 'GET', url = object_url, headers = self.auth_header) as response:
+                    try:
+                        result = await response.json()
+                        params = []
+                        for i in result['design']['filterAlias']:
+                            params.append(i['alias'])
+                            self.object_oql_options[ob] = params
+                        return {ob: params}  
+                    except aiohttp.client_exceptions.ContentTypeError as e:
+                        return {ob:e}
+                    except KeyError as e:
+                        return {ob:e}
+                    except TypeError as e:
+                        return {ob:e}
+            asyncio.run(main())
+            return self.object_oql_options
+        else:
+            single_object_oql_options = {}
+            object_url = self.build_object_url(object)
+            response = requests.request("GET", url = object_url, headers = self.basic_header)
+            params = []
+            try:
+                for i in response.json()['design']['filterAlias']:
+                    params.append(i['alias'])
+                single_object_oql_options[object] = params
+            except:
+                print('Object has no filter options')
+            return single_object_oql_options
+                
+
+    def pull_object_data_dictionary(self, object = ''):
+        self.object_data_dictionary = {}
+        if object == '':
+            async def main():
+                async with aiohttp.ClientSession() as session:
+                    tasks = []
+                    for ob in self.object_list:
+                        task = asyncio.ensure_future(pull(session, ob))
+                        tasks.append(task)
+                    self.object_dictionary_error_logs = await asyncio.gather(*tasks)
+            async def pull(session, ob):
+                ob_url = '/' + str(ob)
+                object_url = str(self.base_url) + str(ob_url) + str(self.data_key)
+                async with session.request(method = 'GET', url = object_url, headers = self.auth_header) as response:
+                    try:
+                        result = await response.json()
+                        definition = []
+                        if ob == 'OrderType':
+                            for i in list(result['DataDictionary'].keys()):
+                                definition.append(i)
+                            self.object_data_dictionary[ob] = definition
+                            return {ob: definition}
+                        else:
+                            for i in list(result['DataDictionary'].keys()):
+                                if i != 'type':
+                                    definition.append(i)
+                            self.object_data_dictionary[ob] = definition
+                    except aiohttp.client_exceptions.ContentTypeError as e:
+                        return {ob:e}
+                    except KeyError as e:
+                        return {ob:e}
+                    except TypeError as e:
+                        return {ob:e}
+            asyncio.run(main())
+            return self.object_data_dictionary
+        else:
+            single_object_data_dictionary = {}
+            object_url = self.build_object_url(object)
+            definition = []
+            response = requests.request("GET", url = object_url, headers = self.auth_header)
+            if object == 'OrderType':
+                for i in list(response.json()['DataDictionary'].keys()):
+                    definition.append(i)
+                single_object_data_dictionary[object] = definition
+                return single_object_data_dictionary
+            else:
+                try:
+                    for i in list(response.json()['DataDictionary'].keys()):
+                        if i != 'type':
+                            definition.append(i)
+                except:
+                    print('Object provided is invalid or does not have data')
+                single_object_data_dictionary[object] = definition
+                return single_object_data_dictionary
+
+
+    def pull_active_po_list(self, source = 'DB2'):
+        self.po_list = []
+        self.uid_list = []
+        self.po_redirects = {}
+        self.po_milestone_redirects = {}
+        self.built_asn_redirects = False
+        if source == 'DHL':
+            offset = 0 
+            url = self.base_url + str('/ASNType/query') + str(self.data_key)
+            response = requests.request('GET', url = url, headers = self.basic_header)
+            has_more = response.json()['resultInfo']['hasMore']
+            loops = math.ceil((response.json()['resultInfo']['estimatedTotalCount'])/100)
+            if has_more != True:
+                url = self.base_url + str('/ASNType/query') + str(self.data_key)
+                response = requests.request('GET', url = url, headers = self.basic_header)
+                data = response.json()['result']
+                for i in data:
+                    uid = i['__metadata']['uid']
+                    po_url = self.base_url + '/ASNType/' + str(uid) + self.data_key
+                    milestone_url = self.base_url + '/ASNType/' + str(uid) +  '/Milestone' + self.data_key
+                    po_response = requests.request('GET', url = po_url, headers = self.basic_header)
+                    po = po_response.json()['Container'][0]['LineItems'][0]['PONumber']
+                    self.po_list.append(po)
+                    self.po_redirects[po] = po_url
+                    self.po_milestone_redirects[po] = milestone_url
+                self.built_asn_redirects = True
+                return self.po_list
+            else:
+                async def main(loops, offset):
+                    async with aiohttp.ClientSession() as session:
+                        tasks = []
+                        for i in range(loops):
+                            task = asyncio.ensure_future(pull(session, offset))
+                            tasks.append(task)
+                            offset = offset + 100
+                        self.active_po_error_logs = await asyncio.gather(*tasks)
+                        tasks = []
+                        for uid in self.uid_list:
+                            task = asyncio.ensure_future(pull_po(session, uid))
+                            tasks.append(task)
+                        self.active_po_error_logs.append(await asyncio.gather(*tasks))
+                async def pull(session, offset):
+                    url = self.base_url + str('/ASNType/query') + str(self.data_key) + '&offset={}'.format(offset)
+                    async with session.request(method = 'GET', url = url, headers = self.auth_header) as response:
+                        try:
+                            await asyncio.sleep(1)
+                            result = await response.json()
+                            data = result['result']
+                            uid_list = []
+                            for i in data:
+                                uid = i['__metadata']['uid']
+                                self.uid_list.append(uid)
+                            return uid_list
+                        except aiohttp.client_exceptions.ContentTypeError as e:
+                            #print(f'{ob} has error {e}')
+                            return {offset:e}
+                        except KeyError as e:
+                            #print(f'{ob} has error {e}')
+                            return {offset:e}
+                        except TypeError as e:
+                            return {offset:e}
+                        #response = requests.request("GET", url = object_url, headers = self.basic_header)
+                async def pull_po(session, uid):
+                    async with session.request(method = 'GET', url = self.base_url + '/ASNType/' + str(uid) + self.data_key, headers = self.auth_header) as response:
+                        try:
+                            result = await response.json()
+                            po = result['Container'][0]['LineItems'][0]['PONumber']
+                            self.po_list.append(po)
+                            self.po_redirects[po] = self.base_url + '/ASNType/' + str(uid) + self.data_key
+                            self.po_milestone_redirects[po] = self.base_url + '/ASNType/' + str(uid) + '/Milestone' + self.data_key
+                            return po
+                        except KeyError as e:
+                            return {uid:e}
+                asyncio.run(main(loops, offset))
+                self.built_asn_redirects = True
+                return self.po_list
+        elif source == 'DB2':
+            # Extract List of PO's from POCTL table
+            poListQuery = '''
+                SELECT 
+                    INTEGER(PURCHASE_ORDER) PURCHASE_ORDER 
+                FROM 
+                    CF_CONFORMED.PURCHASE_ORDER_CONTROL_POCTL pocp 
+                    INNER JOIN CF_CONFORMED.FACTORY_MASTER fm 
+                        ON pocp.FACTORY_NUMBER  = fm.FACTORY_COMPANY_NUMBER 
+                WHERE 
+                    F_FREIGHT_PO <> 'Y'
+                    AND LOGISTIC_CO_NUMBER NOT IN (0, 210, 302)
+                    AND CONTAINER_NUMBER <> ''
+                    AND fm.COUNTRY NOT IN ('MX', 'US')
+                    AND pocp.PO_TYPE NOT IN ('H', 'P')
+            '''
+            po_df = pd.DataFrame()
+            po_df = self.db2_link.extract_data_to_df(poListQuery)
+            self.po_list = list(po_df['PURCHASE_ORDER'])
+            async def main():
+                async with aiohttp.ClientSession() as session:
+                    tasks = []
+                    for po in self.po_list:
+                        task = asyncio.ensure_future(pull(session, po))
+                        tasks.append(task)
+                    await asyncio.gather(*tasks)
+            async def pull(session, po):
+                url = self.base_url + '/ASNType' + '/query' + self.data_key + "&oql={}='{}'".format(self.po_parameter['ASNType'], str(po))
+                async with session.request('GET', url = url, headers = self.auth_header ) as response:
+                    try:
+                        result = await response.json()
+                        uid = result['result'][0]['__metadata']["uid"]
+                        self.uid_list.append(uid)
+                        self.po_redirects[po] = self.base_url + '/ASNType/' + str(uid) + self.data_key
+                        self.po_milestone_redirects[po] = self.base_url + '/ASNType/' + str(uid) + '/Milestone' + self.data_key
+                        print(self.base_url + '/ASNType/' + str(uid) + self.data_key)
+                        return uid
+                    except KeyError as e:
+                        return {e: url}
+            asyncio.run(main())
+            return self.po_list
+        
+
+        
+    def pull_access_token(self, update_db2_token = False):
+        self.token_response = requests.request("GET", url= str(self.base_url) + str(self.data_key), headers= self.basic_header)
+        if self.token_response.ok:
+            self.token = 'Token ' + str(self.token_response.headers['Authorization'])
+            self.auth_header = {
+                    'Authorization' : self.token
+            }
+            return self.auth_header
+        if update_db2_token and self.check_token_authentication():
+            self.db2_link.build_connection()
+            create_token_variable = '''
+                CREATE OR REPLACE VARIABLE CF_CONFORMED.DHL_TOKEN VARCHAR(80 OCTETS)
+                '''
+            self.db2_link.execute_sql(create_token_variable)
+            create_token_variable = '''
+                SET CF_CONFORMED.DHL_TOKEN = {}'''.format(self.token)
+            self.db2_link.close_connection()
+
+
+    def check_token_authentication(self):
+        response = requests.request("GET", url=self.base_url, headers = self.auth_header)
+        if response.ok:
+            return True
+        else:
+            print('Token Invalid, reauthenticate.')
+            manual_autentication = input('Would you like to enter manual token? (Y/N): ')
+            if manual_autentication == 'Y':
+                manual_token = input('Enter manual token: ')
+                self.token = manual_token
+                self.auth_header = {
+                    'Authorization' : self.token
+                }
+                self.check_token_authentication()
+            else:
+                attempt = input('Would you like to reattempt API token pull? (Y/N): ')
+                if attempt == 'Y':
+                    self.pull_access_token()
+                    self.check_token_authentication()
+            return False
+
+    def build_interface(self, build_dictionary = False, source = 'DHL'):
+        #try:
+            print('Pulling access token...')
+            self.pull_access_token()
+            print('Checking Authentication...')
+            self.check_token_authentication()
+            print('Pulling active PO List...')
+            self.pull_active_po_list(source)
+            if build_dictionary:
+                print('Pulling Object List...')
+                self.pull_object_list()
+                print('Pulling OQL Options...')
+                self.pull_object_oql_options()
+                print('Building Data Dictionary...')
+                self.pull_object_data_dictionary()
+            print('Interface Built!')
+            return True
+        #except:
+        #    print('Interface Failed to Build.....')
+        
+
+    # __PEEK METHODS__#
+    def display_objects_options(self):
+        try:
+            print('List of Objects DHL API Offers: ')
+            for ob in self.object_list:
+                print(ob)
+        except:
+            self.pull_object_list()
+            self.display_objects_options()
+
+    def display_data_dictionary(self, object = ''):
+        if object == '':
+            try:
+                print('Data Object Types, and information that object returns: ')
+                for objects in self.object_data_dictionary:
+                    print('\n', objects, ': ', self.object_data_dictionary[objects], "\n")
+            except:
+                self.pull_object_list()
+                self.pull_object_data_dictionary()
+                self.display_data_dictionary()
+        else:
+            try:
+                print('Information options for {} object'.format(object))
+                print(self.pull_object_data_dictionary(object))
+            except:
+                self.pull_object_list()
+                self.pull_object_data_dictionary(object)
+                self.display_data_dictionary(object)
+
+
+    def display_oql_options(self, object = ''):
+        if object == '':
+            try:
+                print('OQL Options for each DHL Object: ')
+                print(self.object_oql_options)
+            except:
+                self.pull_object_list()
+                self.pull_object_oql_options()
+                self.display_oql_options()
+        else:
+            try:
+                print("OQL Options for '{}' object: ".format(object))
+                print(self.pull_object_oql_options(object)[object])
+            except:
+                self.pull_object_list()
+                self.pull_object_oql_options(object)
+                self.display_oql_options(object)
+
+    def display_active_po_list(self, source = 'DB2'):
+        if source == 'DB2':
+            try:
+                print("List of active AS400 PO's: ")
+                print(self.po_list)
+            except:
+                self.pull_active_po_list('DB2')
+                print(self.po_list)
+        elif source == 'DHL':
+            try:
+                print("List of Active DHL PO's: ")
+                print(self.po_list)
+            except:
+                self.pull_active_po_list('DHL')
+                print(self.po_list)
+
+
+    # __PULL METHODS__#
+    def pull_po_uid(self, object, po):
+        uid = ''
+        try:
+            url = self.base_url + '/{}'.format(object) + '/query' + self.data_key + "&oql={}='{}'".format(self.po_parameter[object], str(po))
+            response = requests.request('GET', url = url, headers = self.basic_header)
+            uid = response.json()['result'][0]['__metadata']["uid"]
+        except:
+            print('This PO does not exist in this Object.')
+        return uid
+
+    def pull_po_redirect(self, object, po):
+        try:
+            redirect = ''
+            url = self.base_url + '/{}'.format(object) + '/query' + self.data_key + "&oql={}='{}'".format(self.po_parameter[object], str(po))
+            response = requests.request('GET', url = url, headers = self.basic_header)
+            redirect = response.json()['result'][0]['__metadata']["self"]
+            redirect = str(redirect) + str(self.data_key)
+            return redirect
+        except:
+            print("PO '{}' does not exist in object '{}'".format(po, object))
+            return False
+    
+    def pull_valid_redirect(self, object, po_list):
+        x = 0
+        po_url = self.pull_po_redirect(object, self.po_list[x])
+        while po_url == False:
+            x = x + 1
+            po_url = self.pull_po_redirect(object, self.po_list[x])
+        return po_url 
+
+
+    # __DATA PULL METHODS__#
+    def pull_keys(self, data):
+        keys = []
+        subset = {key: value for key, value in data.items() if type(value) != type([])}
+        keys = keys + list(subset.keys())
+        subset = {key: value for key, value in data.items() if type(value) == type([])}
+        return keys
+
+
+    def pull_custom_oql(self, object, oql = '', format = 'DataFrame'):
+        url = self.build_oql_url(object, oql)
+        response = requests.request('GET', url, headers = self.basic_header)
+        data = response.json()
+        if format == 'json':
+            return data
+        if format == 'DataFrame':
+            return pd.DataFrame(data=data['result'])
+
+    
+
+    def pull_order_type_data(self, po_list = '', granularity = 'All'):
+        self.order_po_df = pd.DataFrame()
+        self.order_type_error_logs = []
+        self.order_redirects = {}
+        async def main(po_list, granularity):
+            print("Extracting order type data w/ granularity of '{}'...".format(granularity))
+            if po_list != '':
+                    self.po_list = po_list
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                for po in self.po_list:
+                    task = asyncio.ensure_future(pull_redirects(session, po))
+                    tasks.append(task)
+                self.order_type_error_logs = await asyncio.gather(*tasks)
+                tasks = []
+                for po in self.order_redirects.keys():
+                    task = asyncio.ensure_future(pull(session, self.order_redirects[po], granularity))
+                    tasks.append(task)
+                self.order_type_error_logs.append(await asyncio.gather(*tasks))
+        async def pull_redirects(session, po):
+            url = self.base_url + '/OrderType/query' + self.data_key + f"&oql={self.po_parameter['OrderType']}='{po}'" 
+            async with session.request(method = 'GET', url = url, headers = self.auth_header) as response:
+                try:
+                    await asyncio.sleep(1)
+                    result = await response.json()
+                    redirect = result['result'][0]['__metadata']["self"]
+                    redirect = str(redirect) + str(self.data_key)
+                    self.order_redirects[po] = redirect
+                    return redirect
+                except KeyError as e:
+                    return {po:e}
+        async def pull(session, redirect, granularity):
+            try:
+                async with session.request('GET', url = redirect, headers = self.auth_header) as response:
+                    await asyncio.sleep(1)
+                    result = await response.json()
+                    if granularity == 'All':
+                        temp = pd.DataFrame(data = result, columns= result.keys())
+                    elif granularity == 'Header':
+                        result = result[granularity]
+                        subset = {key: value for key, value in result.items() if type(value) != type([])}
+                        temp = pd.DataFrame(data = subset, index=[0])
+                        #party = pd.DataFrame(data = result['PartyInfo'])
+                        #party['PO'] = result['OrderNumber']
+                        #temp = temp.join(party.set_index('PO'), on='OrderNumber')
+                    elif granularity == 'Details':
+                        temp = temp = pd.DataFrame(data = result[granularity]['LineItem'])
+                        temp['PO'] = result['Header']['OrderNumber']
+                    self.order_po_df = self.order_po_df.append(temp)
+            except:
+                return redirect
+        asyncio.run(main(po_list, granularity))
+        return self.order_po_df
+                
+    def pull_asn_type_data(self, po_list = '', granularity = 'All'):
+        self.asn_po_df = pd.DataFrame()
+        self.asn_error_logs = []
+        async def main(po_list, granularity):
+            print("Extracting ASNType data w/ granularity of '{}'...".format(granularity))
+            if po_list != '':
+                    self.po_list = po_list
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                if self.built_asn_redirects == False:
+                    for po in self.po_list:
+                        task = asyncio.ensure_future(pull_redirects(session, po))
+                        tasks.append(task)
+                    self.asn_error_logs = await asyncio.gather(*tasks)
+                tasks = []
+                for po in self.po_redirects.keys():
+                    task = asyncio.ensure_future(pull(session, self.po_redirects[po], po, granularity))
+                    tasks.append(task)
+                self.asn_error_logs.append(await asyncio.gather(*tasks))
+        async def pull_redirects(session, po):
+            url = self.base_url + '/ASNType/query' + self.data_key + f"&oql={self.po_parameter['ASNType']}='{po}'" 
+            async with session.request(method = 'GET', url = url, headers = self.auth_header) as response:
+                try:
+                    await asyncio.sleep(1)
+                    result = await response.json()
+                    redirect = result['result'][0]['__metadata']["self"]
+                    redirect = str(redirect) + str(self.data_key)
+                    self.po_redirects[po] = redirect
+                    return redirect
+                except KeyError as e:
+                    return {po:e}
+        async def pull(session, redirect, po, granularity):
+            async with session.request('GET', url = redirect, headers = self.auth_header) as response:
+                try:
+                    await asyncio.sleep(1)
+                    result = await response.json()
+                    if granularity == 'All':
+                        temp = pd.DataFrame().from_dict(result, orient='index')
+                        temp = temp.transpose()
+                        temp['PO'] = po
+                    elif granularity == 'Container':
+                        temp = temp = pd.DataFrame(data = result[granularity])
+                        temp['PO'] = po
+                    elif granularity == 'SKU':
+                        temp = pd.DataFrame(data = result['Container'][0]['LineItems'])
+                        temp['Container'] = result['Container'][0]['ContainerNumber']
+                    self.asn_po_df = self.asn_po_df.append(temp)
+                except KeyError as e:
+                    return {po:e}
+                except:
+                    return {po:'error'}
+        asyncio.run(main(po_list, granularity))
+        return self.asn_po_df
+
+    #def pull_ship_order_data(self, po_list):
+    #def pull_shipping_data(self, po_list):
+    #def pull_transport_data(self, po_list):
+
+    def pull_milestones(self, po_list = '', milestone_status = 'All'):
+        self.po_milestones = pd.DataFrame()
+        self.redirect_offsets = {}
+        self.milestone_error_logs = []
+        self.milestone_temp = pd.DataFrame()
+        async def main(po_list, milestone_status):
+            print(f"Extracting {milestone_status} milestones.....")
+            if po_list != '':
+                self.po_list = po_list
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                if self.built_asn_redirects == False:
+                    self.po_milestone_redirects = {}
+                    for po in self.po_list:
+                        task = asyncio.ensure_future(pull_redirects(session, po))
+                        tasks.append(task)
+                    self.milestone_error_logs = await asyncio.gather(*tasks)
+                tasks = []
+                if milestone_status == 'All':
+                    for po in self.po_milestone_redirects.keys():
+                        task = asyncio.ensure_future(pull_offsets(session, self.po_milestone_redirects[po], po))
+                        tasks.append(task)
+                    self.milestone_error_logs.append(await asyncio.gather(*tasks))
+                    tasks = []
+                    for po in self.redirect_offsets.keys():
+                        for redirect in self.redirect_offsets[po]:
+                            task = asyncio.ensure_future(iterate(session, redirect, po))
+                            tasks.append(task)
+                    self.milestone_error_logs.append(await asyncio.gather(*tasks))
+                    async def data_cleanup(index):
+                        await asyncio.sleep(.0001)
+                        milestone_info = pd.DataFrame().from_dict(self.milestone_temp.at[index, 'MilestoneInfo'], orient = 'index').transpose()
+                        milestone_info['PO'] = self.milestone_temp.at[index, 'PO']
+                        reference_info =  pd.DataFrame(self.milestone_temp.at[index, 'ReferenceInfo'][0]['ReferenceId'])
+                        reference_info.index = [0]*len(reference_info)
+                        reference_info = reference_info.pivot(index = None, columns = 'type1', values='reference')
+                        reference_info['PO'] = self.milestone_temp.at[index, 'PO']
+                        temp = milestone_info.merge(reference_info, on = 'PO')
+                        self.po_milestones = self.po_milestones.append(temp)
+                        print(self.po_milestones)
+                    async def cleanup_main():
+                        await asyncio.gather(*[data_cleanup(index) for index in range(self.milestone_temp.shape[0])])
+                    asyncio.run(cleanup_main())
+                if milestone_status == 'Latest':
+                    for po in self.po_milestone_redirects.keys():
+                        task = asyncio.ensure_future(pull_latest_milestone(session, self.po_milestone_redirects[po], po))
+                        tasks.append(task)
+                    self.milestone_error_logs.append(await asyncio.gather(*tasks))
+                tasks = []
+                if milestone_status == 'Container':
+                    for po in self.po_redirects.keys():
+                        task = asyncio.ensure_future(pull_container_milestone(session, self.po_redirects[po], po))
+                        tasks.append(task)
+                    self.milestone_error_logs.append(await asyncio.gather(*tasks))
+        async def pull_redirects(session, po):
+            url = self.base_url + '/ASNType/query' + self.data_key + f"&oql={self.po_parameter['ASNType']}='{po}'"
+            async with session.request(method = 'GET', url = url, headers = self.auth_header) as response:
+                try:
+                    await asyncio.sleep(1)
+                    result = await response.json()
+                    redirect = result['result'][0]['__metadata']["self"]
+                    redirect = str(redirect) + '/Milestone' + str(self.data_key)
+                    redirect2 = str(redirect) + str(self.data_key)
+                    self.po_milestone_redirects[po] = redirect
+                    self.po_redirects[po] = redirect2
+                    return redirect
+                except KeyError as e:
+                    return {po:e}
+        async def pull_container_milestone(session, redirect, po):
+            redirect = redirect + '&milestone=container'
+            async with session.request('GET', url = redirect, headers  = self.auth_header) as response:
+                try:
+                    result = await response.json()
+                    test = result['MilestoneMessage']['OneReferenceMultipleMilestones'][0]['MilestoneInfo']
+                    temp = pd.DataFrame(test)
+                    temp['PO'] = po
+                    temp['ShipmentID'] = result['ShipmentID']
+                    temp['Voyage'] = result['Voyage']
+                    temp['Vessel'] = result['Vessel']
+                    temp['ContainerNumber'] = result['Container'][0]['ContainerNumber']
+                    temp['LoadPlan'] = result['Container'][0]['LoadPlanName']
+                    temp['ContainerType'] = result['Container'][0]['ContainerType']
+                    temp['ContainerTypeName'] = result['Container'][0]['ContainerTypeName']
+                    temp['LoadLocation'] = result['Container'][0]['LoadLocation']
+                    temp['ContainerWeightKG'] = result['Container'][0]['ActualWeight']['value']
+                    temp['PortOfLoading'] = result['PortOfLoading']['CityName']
+                    temp['PortOfLoadingCountry'] = result['PortOfLoading']['CountryName']
+                    temp['PortOfLoadingCountryCode'] = result['PortOfLoading']['CountryCode']
+                    temp['PortOfDischarge'] = result['PortOfDischarge']['CityName']
+                    date_data = ["EstBLDestDate", "EstOnBoardDate", "EstDepartDate", "EstDischargePortDate"]
+                    temp.rename(columns = {'City':'MilestoneCity'}, inplace = True)
+                    for date in date_data:
+                        try:
+                            temp[f'{date}'] =  result[f'{date}']['value']
+                            temp[f'{date}'] = pd.to_datetime(temp[f'{date}'])
+                        except:
+                            temp[f'{date}'] = ''
+                    for index in range(len(temp)):
+                        try:
+                            change = temp.at[index, 'MilestoneTime'][0]['dateTime']
+                            temp.at[index, 'MilestoneTime'] = change
+                            change = temp.at[index, 'MilestoneCity']['CityName']
+                            temp.at[index, 'MilestoneCity'] = change
+                        except:
+                            temp.at[index, 'MilestoneCity'] = ''
+                            continue
+                    temp['PO'] = pd.to_numeric(temp['PO'])
+                    temp['MilestoneTypeCode'] = pd.to_numeric(temp['MilestoneTypeCode'])
+                    temp['MilestoneTime'] = pd.to_datetime(temp['MilestoneTime'])
+                    temp['LoadPlan'] = pd.to_numeric(temp['LoadPlan'])
+                    temp['ContainerWeightKG'] = pd.to_numeric(temp['ContainerWeightKG'])
+                    self.po_milestones = self.po_milestones.append(temp, ignore_index = True)
+                except KeyError as e:
+                    return {po:e}
+        async def pull_latest_milestone(session, redirect, po):
+            redirect = redirect + "&latestmilestone=true"
+            async with session.request('GET', url = redirect, headers = self.auth_header) as response:
+                result = await response.json()
+                latest = result['__metadata']
+                rem_list = ['apiVersion', 'type', 'self']
+                [latest.pop(key) for key in rem_list]
+                latest_df = pd.DataFrame(latest, index = [0])
+                latest_df['PO'] = po
+                self.po_milestones = self.po_milestones.append(latest_df)
+                return po
+        async def pull_offsets(session, redirect, po):
+            async with session.request('GET', url = redirect, headers = self.auth_header) as response:
+                try:
+                    await asyncio.sleep(1)
+                    result = await response.json()
+                    data_count = result['resultInfo']['estimatedTotalCount']
+                    loops = math.ceil(data_count/100)
+                    self.redirect_offsets[po] = []
+                    offset = 0
+                    for i in range(loops):
+                        self.redirect_offsets[po].append(redirect + f"&offset={offset}") 
+                        offset = offset + 100
+                except:
+                    return redirect
+        async def iterate(session, redirect, po):
+            async with session.request('GET', url = redirect, headers = self.auth_header) as response:
+                template = pd.DataFrame()
+                try:
+                    result = await response.json()
+                    template = pd.DataFrame(data = result['result'])
+                    template['PO']= po
+                    self.milestone_temp = self.milestone_temp.append(template, ignore_index = True)
+                    return po
+                except:
+                    return po
+        asyncio.run(main(po_list, milestone_status))
+        return self.po_milestones
+
+                        
+                        
+                         
+
+
+        
+
+
+    #def close_conection()
+
+
+
+    # __WRITE METHODS__#
+    #def push_to_db2():
