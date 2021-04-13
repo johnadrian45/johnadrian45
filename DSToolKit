@@ -1,0 +1,826 @@
+# DSToolkitClass()
+# Ver 1.1
+
+
+# __Imports__ #
+#@title #Module Imports. Please Hit Run. Double Click to edit
+import ibm_db
+import ibm_db_dbi
+import time
+import csv
+import math
+import pickle
+import datetime as dt
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import itertools
+from sklearn.datasets import fetch_openml
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
+from sklearn.mixture import GaussianMixture
+import umap
+from sklearn.cluster import DBSCAN, AgglomerativeClustering, KMeans
+import pprint
+from sklearn import metrics
+from google.colab import files
+from sqlalchemy import create_engine
+from scipy.stats import zscore
+from sklearn.svm import SVC, SVR
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor, RandomForestClassifier, RandomForestRegressor
+from sklearn.model_selection import train_test_split, RandomizedSearchCV, GridSearchCV
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from statsmodels.tools.eval_measures import mse, rmse
+from sklearn.utils import check_array
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, classification_report
+import statsmodels.api as sm
+import warnings
+warnings.filterwarnings('ignore')
+
+
+
+
+# __Class__ #
+class DSToolkit:
+    """
+    # __Documentation__ #
+    # This class provides methods designed for quick and easy data access, query, exploration, visualization and analysis.
+    # This class needs to be used in tandem with DB2Connector() or DenodoConnector() in order to pull relevant data.
+    """
+
+
+    # __Constructor__ #
+    def __init__(self):
+        print('Toolkit Opened!')
+
+    # Method for finding perfect squares. Better for grid visualization
+    def find_square(num):
+    def is_square(num):
+        if (math.sqrt(num) - math.floor(math.sqrt(num))) == 0:
+        return True
+        else:
+        return False
+    while is_square(num) == False:
+        num = num + 1
+    return math.sqrt(num)
+
+    ## ____METHODS____ ##
+
+
+    # Generalized method for splitting features into lists, grouped by thier 
+    # respective data types, from the input DataFrame <df>. Returns a dictionary
+    # of lists, accessed by the 4 data types seen below.
+    def get_data_types(df):
+    floats = list(df.select_dtypes(include = 'float64').columns)
+    objects = list(df.select_dtypes(include= 'object').columns)
+    bools = list(df.select_dtypes(include= 'bool').columns)
+    ints = list(df.select_dtypes(include= 'int64').columns)
+    data_types_dict = {'floats': floats,
+                    'objects' : objects,
+                    'bools' : bools,
+                    'ints' : ints}
+    return data_types_dict
+
+
+    # Generalized method for plotting distribution of continous variables. <df> is the
+    # DataFrame extracted from data wharehouse using extract methods. <features> is
+    # a list of columns in the DataFrame that are continous variables. This method
+    # will only accept a list of continous variables for <features> parameter.
+    # Please use extract_data_types() method to get dictionary of variables. Continous variables
+    # area accessed with data_types_dict['data_type']. Will display a grid of distributions
+    # for all categorical variables.
+    def create_histograms(df, features):
+    plt.figure(figsize=(20,15))
+    subplot = find_square(len(features))
+    for index, feature in enumerate(features):
+        plt.subplot(subplot, subplot, index+1)
+        plt.hist(df[feature])
+        plt.title('Distribution for {}'.format(feature))
+
+    # Generalized method for plotting feature variables against target variables.
+    # Features and targets can be any combination of continous or categorical variables.
+    # <df> is the DataFrame extracted from data wharehouse using extract methods. 
+    # <features> can be any data type of the data_type_dict, and the <target>
+    # can also be any data type. Please keep in mind that <features> should be a list of features
+    # and <target> is a single column of the DataFrame <df> being fed into the method.
+    # <target_name> is required to distinguish the target column.
+    # Will display a grid of plots, plotting each feature against the target.
+    def plot_features_vs_target(df, features, target, target_name):
+    subplot = find_square(len(features))
+    #(((target.dtype == 'object') or (target.dtype == 'bool')) and ((df[features[0]].dtype == 'float64') or (df[features[0]].dtype == 'int64')))
+    if(((target.dtype == 'object') or (target.dtype == 'bool') or (target.dtype == 'int64')) and (df[features[0]].dtype == 'float64')):
+        plt.figure(figsize=(20,10))
+        for index, col in enumerate(features):
+        plt.subplot(subplot, subplot, index + 1)
+        chart = sns.barplot(df.groupby(target)[col].mean().index, df.groupby(target)[col].mean())
+        plt.title('{} with respect to {} mean'.format(target_name, col))
+        chart.set_xticklabels(chart.get_xticklabels(), rotation=45)
+        plt.tight_layout()
+        plt.show()
+    #(((target.dtype == 'float64') or (target.dtype == 'int64')) and ((df[features[0]].dtype == 'float64') or (df[features[0]].dtype == 'int64')))
+    if((target.dtype == 'float64') and (df[features[0]].dtype == 'float64')):
+        plt.figure(figsize = (20,10))
+        for index, col in enumerate(features):
+        #m, b = np.polyfit(df[col], target, 1)
+        plt.subplot(subplot, subplot, index +1)
+        plt.scatter(df[col], target)
+        #plt.plot(df[col], m*df[col] + b, color = 'red')
+        plt.title('{} vs {}'.format(target_name, col))
+        plt.xlabel(col)
+        plt.ylabel(target_name)
+        plt.tight_layout()
+        plt.show()
+    #(((target.dtype == 'float64') or (target.dtype == 'int64')) and ((df[features[0]].dtype == 'object') or (df[features[0]].dtype == 'bool')))  
+    if(((df[features[0]].dtype == 'object') or (df[features[0]].dtype == 'bool') or (df[features[0]].dtype == 'int64')) and (target.dtype == 'float64')):
+        plt.figure(figsize=(20,10))
+        for index, col in enumerate(features):
+        plt.subplot(subplot, subplot, index + 1)
+        chart = sns.barplot(df.groupby(df[col])[target_name].mean().index, df.groupby(df[col])[target_name].mean())
+        plt.title('{} with respect to {} mean'.format(col, target_name))
+        chart.set_xticklabels(chart.get_xticklabels(), rotation=45)
+        plt.tight_layout()
+        plt.show()
+    
+    # Method for outlier search using Turkey's Method. This method will find outliers
+    # outside a series of thresholds both above and below the inter-quartile range.
+    # Basically any number below a threshold, or any nubmer above a give threshold
+    # will be considered an outlier. Function will start with a small threshold,
+    # and slowly increase threshold to find optimal cutoff for outlier consideration.
+    # <feature> must be a single column of the DataFrame and a continous variable.
+    # <index> is a boolean value indicating whether you also want the indices of the outliers.
+    # <max_threshold> indicates maximum value of threshold. Should be integer no greater than 10.
+    # Function will print the total number of outliers given a certain range, and the upper and lower range.
+    def turkeys_method_outlier_search(feature, max_threshold):
+    q75 = np.percentile(feature, 75)
+    q25 = np.percentile(feature, 25)
+    iqr = q75 - q25
+    for threshold in np.arange(1, max_threshold ,.5):
+        min_val = q25 - (iqr * threshold)
+        max_val = q75 + (iqr * threshold)
+        print('\nOutliers for threshold = {} standard deviations'.format(threshold))
+        print('Upper threshold: {}'.format(max_val))
+        print('Lower threshold: {}'.format(min_val))
+        print("Number of outliers is: {}\n".format(len((np.where((feature > max_val) | (feature < min_val))[0]))))
+
+
+    # Method for plotting confusion matrix, given a simple confusion matrix <cm>,
+    # The names of the categorical targets as a list of strings <target_names>,
+    # <title> as a strings, <cmap> as None, and <normalize> as a boolean to normalize
+    # results, versus raw values. 
+    # Will display a cleaner confusion matrix.
+    def plot_confusion_matrix(cm, target_names, title='Confusion matrix', cmap=None, normalize=True):
+        accuracy = np.trace(cm) / float(np.sum(cm))
+        misclass = 1 - accuracy
+        if cmap is None:
+            cmap = plt.get_cmap('Blues')
+        plt.figure(figsize=(8, 6))
+        plt.imshow(cm, interpolation='nearest', cmap=cmap)
+        plt.title(title)
+        plt.colorbar()
+        if target_names is not None:
+            tick_marks = np.arange(len(target_names))
+            plt.xticks(tick_marks, target_names, rotation=45)
+            plt.yticks(tick_marks, target_names)
+        if normalize:
+            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        thresh = cm.max() / 1.5 if normalize else cm.max() / 2
+        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+            if normalize:
+                plt.text(j, i, "{:0.4f}".format(cm[i, j]),
+                        horizontalalignment="center",
+                        color="white" if cm[i, j] > thresh else "black")
+            else:
+                plt.text(j, i, "{:,}".format(cm[i, j]),
+                        horizontalalignment="center",
+                        color="white" if cm[i, j] > thresh else "black")
+        plt.tight_layout()
+        plt.ylabel('Predicted label')
+        plt.xlabel('True label')
+        plt.show()
+
+    # Method that takes in a dataframe, a target column of that dataframe (as a string) and a data types dictionary 
+    # from the get_data_types(df) method and runs a pearson correlation function on the dataframe, correlating
+    # all the columns of the dataframe with the against the target variable 
+    # with thte target always being the dependent variable.
+    def display_correlation_matrix(df, target, data_types_dict):
+    compare_list = data_types_dict['floats'] + data_types_dict['ints']
+    print('\nCorrelation matrix for {}'.format)
+    print(df[compare_list].corr()[target].sort_values(ascending = False))
+
+
+    # Method that takes a dataframe and a particular column of the dataframe (feature) as a string
+    # and returns a list of summary statistics of that target variable.
+    # Stats displayed are: Count, Count Distinct, Mean, Standard Deviation, Min, Max, 25% quartile
+    # 50% quartile, 75% quartile.
+    def single_feature_describe(df, feature):
+    print('\nStatistics for {}: '.format(feature))
+    print('\n')
+    print(df[feature].describe())
+
+    # Method that either displays the number of nulls for each column in the dataframe, or fills the 
+    # nulls with a 0 (numberic) or a ""(string). Method takes a dataframe, a boolean (True to fill nulls False to Display Only)
+    # and a data types dictionary from the get_data_types(df) method.
+    def find_nulls(df, fill_nulls, data_types_dict):
+    print('\nThe following features have null values: \n')
+    print(df.isna().sum())
+    print('\n')
+    if fill_nulls:
+        df.loc[:, data_types_dict['floats']] = df.loc[:, data_types_dict['floats']].fillna(0)
+        df.loc[:, data_types_dict['objects']] = df.loc[:, data_types_dict['objects']].fillna("")
+
+    # Method that creates dummy features for String/Object data types. The dummy varialbes will give 
+    # quantified values to the string/object allowing the variance found in string/object features used
+    # in regressions/classifications.
+    def create_dummies(df, target):
+    for col in df.columns:
+        if not col == target: 
+        if df[col].dtypes == 'object':
+            df = pd.concat([df, pd.get_dummies(df[col], prefix= "{}_".format(col), drop_first=True)], axis=1)
+    return df
+
+
+    # Method that displays preformance metrics for a regression algorithm. Method takes in 
+    # The seat of features (X) the target variable (Y), the predictions for the test set, 
+    # and model object used.
+    def display_regression_metrics(X, Y, y_preds_test, model):
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    print("R-squared of the model in the training set is: {}".format(model.score(X_train, y_train)))
+    print("-----Test set statistics-----")
+    print("R-squared of the model in the test set is: {}".format(model.score(X_test, y_test)))
+    print("Mean absolute error of the prediction is: {}".format(mean_absolute_error(y_test, y_preds_test)))
+    print("Mean squared error of the prediction is: {}".format(mse(y_test, y_preds_test)))
+    print("Root mean squared error of the prediction is: {}".format(rmse(y_test, y_preds_test)))
+    print("Mean absolute percentage error of the prediction is: {}".format(np.mean(np.abs((y_test - y_preds_test) / y_test)) * 100))
+
+    # Method that displays performance metrics for a classification algorithm. Method takes in 
+    # The seat of features (X) the target variable (Y), the predictions for the test set, 
+    # and model object used.
+    def display_classifier_metrics(X,Y, y_preds_test, y_preds_train):
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    confusion = confusion_matrix(y_test, y_preds_test)
+    targets = []
+    for target in Y.unique():
+        targets.append(target)
+    train_report = classification_report(y_train, y_preds_train)
+    test_report = classification_report(y_test, y_preds_test)
+    print('\nResults for training set: \n')
+    print(train_report)
+    print('\nResults for test set: \n')
+    print(test_report)
+    plot_confusion_matrix(confusion, targets, title = 'Test Set Confusion Matrix')
+
+    # Method that drops all object/string features from a dataframe. Takes a set of features (X)
+    # and returns the same dataframe without object/string columns/features.
+    def drop_object_features(X:
+    for col in X.columns:
+        if X[col].dtype == 'object':
+        X = X.drop(col, axis=1)
+    return X
+            
+    # Method that runs random search cross validation to optimize machine learning models.
+    # This method will run a randomized search for hyperparameters to use in several types of models
+    # In order to find an optimized set of hyperparameters to find a best fit algorithm.
+    # The method takes in a dataframe, a set of features (X) a target variable (Y), a model
+    # object, and the type of model as a string. 
+    # the type_model this function takes are: 'LinearRegressor', 'LogisticClassifier', 
+    # 'SupportVectorClassifier', 'SupportVectorRegressor', 'RandomForestClassifier',
+    # 'RandomForestRegressor', 'GradientBoostedClassifier', 'GradientBoostedRegressor'.
+    def model_optimizer(df, X, Y, model, type_model):
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    if type_model == 'LinearRegressor':
+        random_grid = {'fit_intercept': [True, False],
+                    'normalize': [True, False],
+                    'n_jobs' : [int(x) for x in np.arange(-1,10,1)]}
+        random_lrm = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2, 
+                                        n_jobs = -1)
+        random_lrm.fit(X_train,y_train)
+        best_params = random_lrm.best_params_
+        optimized_lrm = LinearRegression(fit_intercept= best_params['fit_intercept'],
+                                    normalize = best_params['normalize'],
+                                    n_jobs = best_params['n_jobs'])
+        return optimized_lrm
+    if type_model == 'LogisticClassifier':
+        random_grid = {'penalty' : ['l1', 'l2', 'elasticnet', 'none'],
+                    'fit_intercept': [True, False],
+                    'class_weight': ['balanced', None],
+                    'solver' : ['newton-cg', 'lbfgs', 'liblinear', 'sag', 'saga'],
+                    'max_iter' : [int(x) for x in np.arange(100,250)]}
+        random_lgc = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2,
+                                        n_jobs = -1)
+        random_lgc.fit(X_train, y_train)
+        best_params = random_lgc.best_params_
+        optimized_lgc = LogisticRegression(penalty= best_params['penalty'],
+                                        fit_intercept = best_params['fit_intercept'],
+                                        class_weight = best_params['class_weight'],
+                                        solver = best_params['solver'],
+                                        max_iter = best_params['max_iter'])
+        return optimized_lgc
+    if type_model == 'SupportVectorClassifier':
+        random_grid = {'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],
+                    'shrinking' : [True, False],
+                    'gamma' : ['scale', 'auto'],
+                    'cache_size' : [int(x) for x in np.arange(500,700)],
+                    'class_weight' : ['balanced', None],
+                    'max_iter' : [int(x) for x in np.arange(10,50)]}
+        random_svc = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2,
+                                        n_jobs = -1)
+        random_svc.fit(X_train,y_train)
+        best_params = random_svc.best_params_
+        optimized_svc = SVC(kernel= best_params['kernel'],
+                            shrinking = best_params['shrinking'],
+                            cache_size = best_params['cache_size'],
+                            class_weight = best_params['class_weight'],
+                            max_iter = best_params['max_iter'],
+                            gamma = best_params['gamma'])
+        return optimized_svc
+    if type_model == 'SupportVectorRegressor':
+        random_grid = {'kernel' : ['linear', 'poly', 'rbf', 'sigmoid'],
+                    'gamma' : ['scale', 'auto'],
+                    'shrinking' : [True, False],
+                    'cache_size' : [int(x) for x in np.arange(500,700)],
+                    'verbose' : [True, False]}
+        random_svr = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2,
+                                        n_jobs = -1)
+        random_svr.fit(X_train,y_train)
+        best_params = random_svr.best_params_
+        optimized_svr = SVR(kernel= best_params['kernel'],
+                            gamma = best_params['gamma'],
+                            shrinking = best_params['shrinking'],
+                            chache_size = [int(x) for x in np.arange(500,700)],
+                            verbose = best_params['verbose'])
+        return optimized_svr
+    if type_model == 'RandomForestClassifier':
+        random_grid = {'n_estimators': [int(x) for x in  np.arange(50,500)], # change to 50 to 500 a huge number of trees can overfit
+                    'max_features': ['auto', 'sqrt'],
+                    'max_depth' : [int(x) for x in np.arange(2, 50)], # bring it back to prevent overfitting 2 - 50
+                    'min_samples_split' : [int(x) for x in np.arange(2,100)], # these can be a range 
+                    'min_samples_leaf': [int(x) for x in np.arange(1,4)], # these can be a range
+                    'bootstrap': [True, False]}
+        rfc_random = RandomizedSearchCV(estimator= model, 
+                                        param_distributions= random_grid,
+                                        n_iter = 50, 
+                                        cv = 2, 
+                                        verbose = 2, 
+                                        random_state = 42,
+                                        n_jobs = -1)
+        rfc_random.fit(X_train,y_train)
+        best_params = rfc_random.best_params_
+        optimized_rfc = ensemble.RandomForestClassifier(n_estimators= best_params['n_estimators'],
+                                                        max_depth = best_params['max_depth'],
+                                                        min_samples_leaf = best_params['min_samples_leaf'],
+                                                        min_samples_split = best_params['min_samples_split'],
+                                                        bootstrap = best_params['bootstrap'],
+                                                        max_features = best_params['max_features'],
+                                                        class_weight = best_params['class_weight'])
+        return optimized_rfc
+    if type_model == 'RandomForestRegressor':
+        random_grid = {'n_estimators' : [int(x) for x in np.arange(50,75)],
+                    'criterion' : ['mse', 'mae'],
+                    'max_depth': [int(x) for x in np.arange(2,100)],
+                    'min_samples_split' : [int(x) for x in np.arange(2,5)],
+                    'min_samples_leaf' : [int(x) for x in np.arange(1,5)],
+                    'max_features' : ['auto', 'sqrt'],
+                    'bootstrap' : [True, False]}
+        rfr_random = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2,
+                                        n_jobs = -1)
+        rfr_random.fit(X_train, y_train)
+        best_params = rfr_random.best_params_
+        optimized_rfr = RandomForestRegressor(n_estimators= best_params['n_estimators'],
+                                            criterion = best_params['criterion'],
+                                            max_depth = best_params['max_depth'],
+                                            min_samples_split = best_params['min_samples_split'],
+                                            min_samples_leaf = best_params['min_samples_leaf'],
+                                            max_features = best_params['max_features'],
+                                            bootstrap = best_params['bootstrap'])
+        return optimized_rfr
+    if type_model == 'GradientBoostedClassifier':
+        random_grid = {'loss' : ['deviance', 'exponential'],
+                    'n_estimators' : [int(x) for x in np.arange(50,100)],
+                    'criterion' : ['friedman_mse', 'mse', 'mae'],
+                    'mins_samples_split' : [int(x) for x in np.arange(2,100)],
+                    'min_sampels_leaf' : [int(x) for x in np.arange(1,4)],
+                    'max_depth': [int(x) for x in np.arange(2,50)],
+                    'max_features' : ['auto', 'sqrt', 'log2']}
+        gbc_random = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2,
+                                        n_jobs = -1)
+        gbc_random.fit(X_train,y_train)
+        best_params = gbc_random.best_params_
+        optimized_gbc = GradientBoostingClassifier(loss= best_params['loss'],
+                                                n_estimators = best_params['n_estimators'],
+                                                criterion = best_params['criterion'],
+                                                min_samples_split = best_params['min_samples_split'],
+                                                min_samples_leaf = best_params['min_samples_leaf'],
+                                                max_depth = best_params['max_depth'],
+                                                max_features = best_params['max_features'])
+        return optimized_gbc
+    if type_model == 'GradientBoostedRegressor':
+        random_grid = {'loss' : ['ls', 'lad', 'huber', 'quantile'],
+                    'n_estimators' : [int(x) for x in np.arange(50,100)],
+                    'criterion' : ['friedman_mse', 'mse', 'mae'],
+                    'min_samples_split' : [int(x) for x in np.arange(2,100)],
+                    'min_samples_leaf' : [int(x) for x in np.arange(1,4)],
+                    'max_depth': [int(x) for x in np.arange(2,100)],
+                    'max_features' : ['auto', 'sqrt', 'log2']}
+        gbr_random = RandomizedSearchCV(estimator = model,
+                                        param_distributions = random_grid,
+                                        n_iter = 50,
+                                        cv = 2,
+                                        random_state = 42,
+                                        verbose = 2,
+                                        n_jobs = -1)
+        gbr_random.fit(X_train,y_train)
+        best_params = gbr_random.best_params_
+        optimized_gbr = GradientBoostingRegressor(loss= best_params['loss'],
+                                                n_estimators = best_params['n_estimators'],
+                                                criterion = best_params['criterion'],
+                                                min_samples_split = best_params['min_samples_split'],
+                                                min_samples_leaf = best_params['min_samples_leaf'],
+                                                max_depth = best_params['max_depth'],
+                                                max_features = best_params['max_features'])
+        return optimized_gbr
+
+
+    
+    # Method for training a LinearModel() object. This method takes a DataFrame, a target string 
+    # (column of the DataFrame), a model_type string ('Classifier', 'Regressor'), a boolean optimize
+    # to determine wether an optimization CV should be ran on the model, and a boolean metrics,
+    # to determine wether perfomance metrics should be shown. Returns a LinearModel() object
+    # fitted to the DataFrame.
+    def linear_model(df, target, model_type, optimize, metrics):
+    if model_type == 'Classifier':
+        print('Does not currently support linear classifiers')
+    if model_type == 'Regressor':
+        Y = df[target]
+        X = df.drop(target, axis = 1)
+        X = prepare_data(X,Y)
+        X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+        if optimize:
+        print('...optimizing Linear Regressor...')
+        lrm_optimized = model_optimizer(df, X, Y, LinearRegression(), 'LinearRegressor')
+        lrm_optimized.fit(X_train, y_train)
+        y_preds_test = lrm_optimized.predict(X_test)
+        if metrics:
+            print('Metrics for optimized linear regression model: ')
+            display_regression_metrics(X, Y, y_preds_test, lrm_optimized )
+        return lrm_optimized
+        else:
+        print('...running Linear Regressor...')
+        lrm = LinearRegression()
+        lrm.fit(X_train, y_train)
+        y_preds_test = lrm.predict(X_test)
+        if metrics:
+            print('Metrics for base linear regression model: ')
+            display_regression_metrics(X, Y, y_preds_test, lrm)
+        return lrm
+        
+    # Method for training a LogisticModel() object. This method takes a DataFrame, a target string 
+    # (column of the DataFrame), a model_type string ('Classifier', 'Regressor'), a boolean optimize
+    # to determine wether an optimization CV should be ran on the model, and a boolean metrics,
+    # to determine wether perfomance metrics should be shown. Returns a LogisticModel() object
+    # fitted to the DataFrame.
+    def logistic_model(df, target, model_type, optimize, metrics):
+    Y = df[target]
+    X = df.drop(target, axis=1)
+    X = prepare_data(X,Y)
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    if model_type == 'Classifier':
+        if (df[target].dtype == 'object') or (df[target].dtype =='bool'):
+        if optimize:
+            print('...optimizing Logistic Classifier...')
+            lcm_optimized = model_optimizer(df, X, Y, LogisticRegression(), 'LogisticClassifier')
+            lcm_optimized.fit(X_train, y_train)
+            y_preds_test = lcm_optimized.predict(X_test)
+            y_preds_train = lcm_optimized.predict(X_train)
+            if metrics:
+            print('Metrics for optimized logistic classifier: ')
+            display_classifier_metrics(X, Y, y_preds_test, y_preds_train)
+            return lcm_optimized
+        else:
+            print('...running Logistic Classifier...')
+            lcm = LogisticRegression()
+            lcm.fit(X_train, y_train)
+            y_preds_train = lcm.predict(X_train)
+            y_preds_test = lcm.predict(X_test)
+            if metrics:
+            print('Metrics for base logistic classifier model: ')
+            display_classifier_metrics(X, Y, y_preds_test, y_preds_train)
+            return lcm
+        else:
+        print('Classifier model only supports categorical targets.')
+    if model_type == 'Regressor':
+        print('Function does not support Regression')
+
+    # Method for training a SupportVectorMachine() object. This method takes a DataFrame, a target string 
+    # (column of the DataFrame), a model_type string ('Classifier', 'Regressor'), a boolean optimize
+    # to determine wether an optimization CV should be ran on the model, and a boolean metrics,
+    # to determine wether perfomance metrics should be shown. Returns a SupportVectorMachine() object
+    # fitted to the DataFrame.
+    def svm_model(df, target, model_type, optimize, metrics):
+    Y = df[target]
+    X = df.drop(target, axis=1)
+    X = prepare_data(X,Y)
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    if model_type == 'Classifier':
+        if (df[target].dtype == 'object') or (df[target].dtype =='bool'):
+        if optimize:
+            print('...optimizing Support Vector Classifier...')
+            svc_optimized = model_optimizer(df, X, Y, SVC(), 'SVC')
+            svc_optimized.fit(X_train, y_train)
+            y_preds_train = svc_optimized.predict(X_train)
+            y_preds_test = svc_optimized.predict(X_test)
+            if metrics:
+            print('Metrics for optimized support vector classifier: ')
+            display_classifier_metrics(X, Y, y_preds_test, y_preds_train)   
+            return svc_optimized
+        else:
+            print('...running Support Vector Classifier...')
+            svc = SVC()
+            svc.fit(X_train, y_train)
+            y_preds_train = svc.predict(X_train)
+            y_preds_test = svc.predict(X_test)
+            if metrics:
+            print('Metrics for base support vector classifier: ')
+            display_classifier_metrics(X,Y, y_preds_test, y_preds_train)
+        else:
+        print('Classifier model only supports categorical targets.')
+    if model_type == 'Regressor':
+        if optimize:
+        print('...optimizing Support Vector Regressor...')
+        svr_optimized = model_optimizer(df, X, Y, SVR(), 'SVR')
+        svr_optimized.fit(X_train, y_train)
+        y_preds_test = svr.predict(X_test)
+        if metrics:
+            print('Metrics for optimized support vector regressor: ')
+            display_regression_metrics(X,Y, y_preds_test, svr_optimized)
+        return svr_optimized
+        else:
+        print('...running Support Vector Regressor...')
+        svr = SVR()
+        svr.fit(X_train, y_train)
+        y_preds_test = svr.predict(X_test)
+        if metrics:
+            print('Metrics for base support vector regressor: ')
+            display_regression_metrics(X,Y, y_preds_test, svr)
+        return svr
+
+    # Method for training a RandomForest() object. This method takes a DataFrame, a target string 
+    # (column of the DataFrame), a model_type string ('Classifier', 'Regressor'), a boolean optimize
+    # to determine wether an optimization CV should be ran on the model, and a boolean metrics,
+    # to determine wether perfomance metrics should be shown. Returns a RandomForest() object
+    # fitted to the DataFrame.
+    def random_forest_model(df, target, model_type, optimize, metrics):
+    Y = df[target]
+    X = df.drop(target, axis=1)
+    X = prepare_data(X,Y)
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    if model_type == 'Classifier':
+        if (df[target].dtype == 'object') or (df[target].dtype =='bool'):
+        if optimize:
+            print('...optimizing Random Forest Classifier...')
+            optimized_rfc = model_optimizer(df, X, Y, RandomForestClassifier(), 'RFC')
+            optimized_rfc.fit(X_train, y_train)
+            y_preds_train = optimized_rfc.predict(X_train)
+            y_preds_test = optimized_rfc.predict(X_test)
+            if metrics:
+            print('Metrics for optimized random forest classifier: ')
+            display_classifier_metrics(X,Y, y_preds_test, y_preds_train)
+            return optimized_rfc
+        else:
+            print('...running Random Forest Classifier...')
+            rfc = RandomForestClassifier
+            rfc.fit(X_train, y_train)
+            y_preds_train = rfc.predict(X_train)
+            y_preds_test = rfc.predict(X_test)
+            if metrics:
+            print('Metrics for base random forest classifier: ')
+            display_classifier_metrics(X,Y, y_preds_test, y_preds_test)
+            return rfc
+        else:
+        print('Classifier model only supports categorical targets.')
+    if model_type == "Regressor":
+        if optimize:
+        print('...optimizing Random Forest Regressor...')
+        rfr = model_optimizer(df, X, Y, RandomForestRegressor(), 'RFR')
+        rfr.fit(X_train, y_train)
+        y_preds_test = rfr.predict(X_test)
+        if metrics:
+            print('Metrics for optimized random forest regressor: ')
+            display_regression_metrics(X,Y, y_preds_test, rfr)
+        return rfr
+        else:
+        print('...running Random Forest Regressor...')
+        rfr = RandomForestRegressor(n_estimators=50)
+        rfr.fit(X_train, y_train)
+        y_preds_test = rfr.predict(X_test)
+        if metrics:
+            print('Metrics for base random forest regressor: ')
+            display_regression_metrics(X,Y, y_preds_test, rfr)
+        return rfr
+
+
+    # Method for training a GradientBooster() object. This method takes a DataFrame, a target string 
+    # (column of the DataFrame), a model_type string ('Classifier', 'Regressor'), a boolean optimize
+    # to determine wether an optimization CV should be ran on the model, and a boolean metrics,
+    # to determine wether perfomance metrics should be shown. Returns a GradientBooster() object
+    # fitted to the DataFrame.
+    def gbm_model(df, target, model_type, optimize, metrics):
+    Y = df[target]
+    X = df.drop(target, axis=1)
+    X = prepare_data(X,Y)
+    X_train, X_test, y_train, y_test = train_test_split(X,Y, random_state = 465)
+    if model_type == 'Classifier':
+        if (df[target].dtype == 'object') or (df[target].dtype =='bool'):
+        if optimize:
+            print('...optimizing GBM Classifier...')
+            gbm = model_optimizer(df, X, Y, GradientBoostingClassifier(), 'GBC')
+            gbm.fit(X_train, y_train)
+            y_preds_train = gbm.predict(X_train)
+            y_preds_test = gbm.predict(X_test)
+            if metrics:
+            print('Metrics for optimized Gradient Boosted Classifier: ')
+            display_classifier_metrics(X,Y, y_preds_test, y_preds_train)
+            return optimized_rfc
+        else:
+            print('...running GBM Classifier...')
+            rfc = RandomForestClassifier
+            rfc.fit(X_train, y_train)
+            y_preds_train = rfc.predict(X_train)
+            y_preds_test = rfc.predict(X_test)
+            if metrics:
+            print('\nMetrics for base GBM Classifier: ')
+            display_classifier_metrics(X,Y, y_preds_test, y_preds_test)
+            return rfc
+        else:
+        print('\nClassifier model only supports categorical targets.\n')
+    if model_type == "Regressor":
+        if optimize:
+        print('...optimizing GBM Regressor...')
+        rfr = model_optimizer(df, X, Y, GradientBoostingRegressor(), 'GBR')
+        rfr.fit(X_train, y_train)
+        y_preds_train = rfr.predict(X_train)
+        y_preds_test = rfr.predict(X_test)
+        if metrics:
+            print('\nMetrics for optimized Gradient Boosted Regressor: ')
+            display_regression_metrics(X,Y, y_preds_test, rfr)
+        return rfr
+        else:
+        print('...running GBM Regresor...')
+        rfr = RandomForestRegressor(n_estimators=50)
+        rfr.fit(X_train, y_train)
+        y_preds_test = rfr.predict(X_test)
+        if metrics:
+            print('\nMetrics for base Gradient Boosted Regressor: ')
+            display_regression_metrics(X,Y, y_preds_test, rfr)
+        return rfr
+
+    def knn_model(df, target, model_type, optimize, metrics):
+    return
+
+    # Method that finds the optimal number of of clusters for a given set of training features X,
+    # in the form a pandas DataFrame
+    def optimal_k(X):
+    squared_distance = []
+    K = range(1,5)
+    for k in K:
+        km = KMeans(n_clusters = k)
+        km = km.fit(X)
+        squared_distance.append(km.inertia_)
+    plt.plot(K, squared_distance, 'bx-')
+    plt.title('Optimization function on k-clusters')
+    plt.show()
+
+    # Runs a K_Means cluster algorithm on a data set. Takes in a set of training features X,
+    # the number of clusters you would like to find (ideally found by optimal_k function), 
+    # a boolean s_metrics, wether performance metrics are shown or not, a boolean visual,
+    # wether a visual cluster should be shown, and an optional string method detailing the type
+    # of method you are using for display purposes.
+    def k_cluster(X, clusters, s_metrics, visual, method):
+    kmeans = KMeans(n_clusters= clusters)
+    kmeans_clusters = kmeans.fit_predict(X)
+    print(kmeans_clusters)
+    if s_metrics:
+        print('Silhouette score for kmeans: {}\n'.format(metrics.silhouette_score(X, kmeans_clusters, metric='euclidean')))
+    if visual:
+        cluster_visual(X, kmeans_clusters, method, 'K-Means')
+    if s_metrics:
+        X['clusters'] = kmeans_clusters
+        cluster_1 = pd.DataFrame()
+        cluster_2 = pd.DataFrame()
+        for col in X.columns:
+        cluster_1[col] = X[X['clusters'] == 0][col]
+        cluster_2[col] = X[X['clusters'] == 1][col]
+        cluster1_percentage = cluster_1.shape[0]/(cluster_1.shape[0] + cluster_2.shape[0])
+        cluster2_percentage = cluster_2.shape[0]/(cluster_1.shape[0] + cluster_2.shape[0])
+        print('Cluster 1 contains {}% of the total data.'.format(cluster1_percentage*100))
+        print('Cluster 2 contains {}% of the total data.'.format(cluster2_percentage*100))
+
+    # Runs an Agglomerative Cluster algorithm on a data set. Takes in a set of training features X,
+    # the number of clusters you would like to find (ideally found by optimal_k function), 
+    # a boolean s_metrics, affinity a float type which details how similar points within a cluster should be
+    # linkage a float which details how similar clusters shoud be to each other,
+    # a boolean which  wether performance metrics are shown or not, a boolean visual,
+    # wether a visual cluster should be shown, and an optional string method detailing the type
+    # of method you are using for display purposes.
+    def agg_cluster(X, clusters, affinity, linkage, s_metrics, visual, method):
+    agg = AgglomerativeClustering(n_clusters= clusters, affinity= affinity, linkage= linkage)
+    agg_clusters= agg.fit_predict(X)
+    if s_metrics:
+        print('Silhouette score for agglomerative clustering: {}'.format(metrics.silhouette_score(X, agg_clusters,metric='euclidean')))
+    if visual:
+        cluster_visual(X, agg_clusters, method, 'Agglomerative Clustering')
+
+
+    # Runs a GaussinMixModel cluster algorithm on a data set. Takes in a set of training features X,
+    # the number of clusters you would like to find (ideally found by optimal_k function), 
+    # a boolean s_metrics, wether performance metrics are shown or not, a boolean visual,
+    # wether a visual cluster should be shown, and an optional string method detailing the type
+    # of method you are using for display purposes.
+    def gmm_cluster(X, components, s_metrics, visual, method):
+    gmm = GaussianMixture(n_components=2, random_state=123)
+    gmm_clusters = gmm.fit_predict(X)
+    if s_metrics:
+        print('Silhouette score for Gaussian Mixture Model clustering: {}'.format(metrics.silhouette_score(X, gmm_clusters, metric= 'euclidean')))
+    if visual:
+        cluster_visual(X, gmm_clusters, method, 'Guassian Mixture')
+
+    # Runs a DiameterBasedScan cluster algorithm on a data set. Takes in a set of training features X,
+    # the epicenter that should be used for the cluster, the number of samples that should be used, 
+    # a boolean s_metrics, wether performance metrics are shown or not, a boolean visual,
+    # wether a visual cluster should be shown, and an optional string method detailing the type
+    # of method you are using for display purposes.
+    def dbscan_cluster(X, eps, samples, s_metrics, visual, method):
+    dbscan = DBSCAN(eps=eps, min_samples= samples)
+    dbscan_clusters = dbscan.fit_predict(X)
+    if s_metrics:
+        print('Silhouette score for kmeans method: {}'.format(metrics.silhouette_score(X, dbscan_clusters, metric= 'euclidean')))
+    if visual:
+        cluster_visual(X, dbscan_clusters, method, 'DBSCAN')
+
+    # Method for displaying a visual representation of a clustering algorithm. For data sets greater than 2 dimensions, 
+    # dimensionality reduction will be used (either Principal Components, TSNE, or UMAP)
+    def cluster_visual(X, clusters, method, cluster_alg):
+    if method == 'PCA':
+        pca_reduced_data = PCA(n_components=2).fit_transform(X)
+        plt.scatter(pca_reduced_data[:,0], pca_reduced_data[:,1], c = clusters)
+        plt.title("PCA reduction on data set w/ {}".format(cluster_alg))
+    if method == 'TSNE':
+        tsne_reduced_data = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300).fit_transform(X)
+        plt.scatter(tsne_reduced_data[:,0], tsne_reduced_data[:,1], c = clusters)
+        plt.title("PCA reduction on data set w/ {}".format(cluster_alg))
+    if method == 'UMAP':
+        umap_reduced_data = umap.UMAP(n_components=2, min_dist=.3, metric='correlation').fit_transform(X)
+        plt.scatter(umap_reduced_data[:,0], umap_reduced_data[:,1], c = clusters)
+        plt.title("PCA reduction on data set w/ {}".format(cluster_alg))
+
+
+    # method to export a set of prediction to a csv
+    def export_csv(test_set, test_predictions, target_variable, metrics):
+    df = pd.DataFrame()
+    df['{}_PREDICTIONS'.format(target_variable)] = test_predictions
+    df = pd.concat([test_set, df], axis=1)
+    file_name = 'Model results {}.csv'.format(dt.datetime.now())
+    csv_file = df.to_csv(file_name)
+    files.download(file_name)
+
+    # Method to create a pickle of a model.
+    def create_pickle(pickle_model):
+    output = open('model.pkl', 'wb')
+    pickle.dump(pickle_model, output)
+    files.download('model.pkl')
