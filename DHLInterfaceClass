@@ -589,9 +589,6 @@ class DHLInterface:
         asyncio.run(main(po_list, granularity))
         return self.asn_po_df
 
-    #def pull_ship_order_data(self, po_list):
-    #def pull_shipping_data(self, po_list):
-    #def pull_transport_data(self, po_list):
 
     def pull_milestones(self, po_list = '', milestone_status = 'All'):
         self.po_milestones = pd.DataFrame()
@@ -754,9 +751,3 @@ class DHLInterface:
         
 
 
-    #def close_conection()
-
-
-
-    # __WRITE METHODS__#
-    #def push_to_db2():
